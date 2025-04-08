@@ -1,3 +1,4 @@
+
 import type { Config } from "tailwindcss";
 
 export default {
@@ -61,6 +62,15 @@ export default {
 					'accent-foreground': 'hsl(var(--sidebar-accent-foreground))',
 					border: 'hsl(var(--sidebar-border))',
 					ring: 'hsl(var(--sidebar-ring))'
+				},
+				kami: {
+					cosmic: '#8B5CF6',
+					celestial: '#D946EF',
+					azure: '#33C3F0',
+					golden: '#FEF7CD',
+					sakura: '#FFDEE2',
+					void: '#1A1F2C',
+					ethereal: '#E5DEFF',
 				}
 			},
 			borderRadius: {
@@ -84,12 +94,81 @@ export default {
 					to: {
 						height: '0'
 					}
+				},
+				'float': {
+					'0%, 100%': {
+						transform: 'translateY(0px)'
+					},
+					'50%': {
+						transform: 'translateY(-20px)'
+					},
+				},
+				'pulse-glow': {
+					'0%, 100%': {
+						opacity: '1',
+						filter: 'brightness(1)'
+					},
+					'50%': {
+						opacity: '0.8',
+						filter: 'brightness(1.3)'
+					},
+				},
+				'shimmer': {
+					'0%': {
+						backgroundPosition: '-200% 0'
+					},
+					'100%': {
+						backgroundPosition: '200% 0'
+					},
+				},
+				'rotate-slow': {
+					'0%': {
+						transform: 'rotate(0deg)'
+					},
+					'100%': {
+						transform: 'rotate(360deg)'
+					},
+				},
+				'ripple': {
+					'0%': {
+						transform: 'scale(0)',
+						opacity: '0.5'
+					},
+					'100%': {
+						transform: 'scale(4)',
+						opacity: '0'
+					},
+				},
+				'cosmic-shift': {
+					'0%': { 
+						backgroundPosition: '0% 50%' 
+					},
+					'50%': { 
+						backgroundPosition: '100% 50%' 
+					},
+					'100%': { 
+						backgroundPosition: '0% 50%' 
+					},
 				}
 			},
 			animation: {
 				'accordion-down': 'accordion-down 0.2s ease-out',
-				'accordion-up': 'accordion-up 0.2s ease-out'
-			}
+				'accordion-up': 'accordion-up 0.2s ease-out',
+				'float': 'float 6s ease-in-out infinite',
+				'pulse-glow': 'pulse-glow 3s ease-in-out infinite',
+				'shimmer': 'shimmer 8s ease-in-out infinite',
+				'rotate-slow': 'rotate-slow 12s linear infinite',
+				'ripple': 'ripple 1s linear forwards',
+				'cosmic-shift': 'cosmic-shift 15s ease infinite',
+			},
+			backgroundImage: {
+				'cosmic-gradient': 'linear-gradient(45deg, #8B5CF6, #D946EF, #0EA5E9, #8B5CF6)',
+				'ethereal-glow': 'radial-gradient(circle, rgba(229, 222, 255, 0.6) 0%, rgba(139, 92, 246, 0.2) 70%, rgba(25, 31, 44, 0) 100%)',
+				'magical-portal': 'conic-gradient(from 0deg at 50% 50%, #D946EF, #8B5CF6, #0EA5E9, #D946EF)',
+			},
+			backdropFilter: {
+				'cosmic': 'blur(10px) saturate(180%)',
+			},
 		}
 	},
 	plugins: [require("tailwindcss-animate")],

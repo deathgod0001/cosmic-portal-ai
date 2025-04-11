@@ -1,318 +1,531 @@
 
 import React, { useState, useRef, useEffect } from 'react';
-import ThreeJSBackground from '@/components/ThreeJSBackground';
-import Navigation from '@/components/Navigation';
-import MagicButton from '@/components/MagicButton';
+import { motion, AnimatePresence } from 'framer-motion';
 import { toast } from 'sonner';
-import { cn } from '@/lib/utils';
+import { Button } from '@/components/ui/button';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import ChatMessage from '@/components/chat/ChatMessage';
+import { Loader2, Download, Trash2, Settings, Brain } from 'lucide-react';
+import KamiVoice from '@/components/voice/KamiVoice';
+import KamiImage from '@/components/image/KamiImage';
+import KamiSettings from '@/components/settings/KamiSettings';
+import SpeechService from '@/services/SpeechService';
+import BackgroundPlayer from '@/components/audio/BackgroundPlayer';
 
-interface Message {
+type Message = {
   id: string;
+  role: 'user' | 'assistant';
   content: string;
-  isUser: boolean;
   model: string;
-  timestamp: Date;
+};
+
+type AIModel = {
+  id: string;
+  name: string;
+  description: string;
+  puterConfig: {
+    model: string;
+    responseExtractor?: (response: any) => string;
+    useContext: boolean;
+  };
+};
+
+declare global {
+  interface Window {
+    puter: any;
+  }
 }
 
-const modelOptions = [
-  { id: 'gpt-4o', name: 'GPT-4o', description: 'Latest OpenAI model with advanced reasoning' },
-  { id: 'claude-3-7-sonnet', name: 'Claude 3.7', description: 'Anthropic\'s latest model with exceptional insights' },
-  { id: 'meta-llama/llama-3.3-70b-instruct', name: 'Llama 3', description: 'Meta\'s powerful open model' },
-  { id: 'deepseek-reasoner', name: 'DeepSeek', description: 'Specialized in complex reasoning' },
-  { id: 'google/gemini-2.5-pro-exp-03-25:free', name: 'Gemini 2.5', description: 'Google\'s advanced multimodal model' },
+const availableModels: AIModel[] = [
+  { 
+    id: 'gpt-4o', 
+    name: 'GPT-4o', 
+    description: 'OpenAI\'s most advanced model',
+    puterConfig: {
+      model: 'gpt-4o',
+      responseExtractor: (response: any) => {
+        if (typeof response === 'string') return response;
+        return response?.message?.content || JSON.stringify(response);
+      },
+      useContext: true
+    }
+  },
+  { 
+    id: 'claude-3-7-sonnet', 
+    name: 'Claude 3.7', 
+    description: 'Anthropic\'s latest AI assistant',
+    puterConfig: {
+      model: 'claude-3-7-sonnet',
+      responseExtractor: (response: any) => {
+        if (typeof response === 'string') return response;
+        return response?.message?.content?.[0]?.text || JSON.stringify(response);
+      },
+      useContext: true
+    }
+  },
+  { 
+    id: 'meta-llama/llama-3.3-70b-instruct', 
+    name: 'Llama 3.3', 
+    description: 'Meta\'s open-source model',
+    puterConfig: {
+      model: 'meta-llama/llama-3.3-70b-instruct',
+      responseExtractor: (response: any) => {
+        if (typeof response === 'string') return response;
+        return response?.message?.content || JSON.stringify(response);
+      },
+      useContext: true
+    }
+  },
+  { 
+    id: 'deepseek-reasoner', 
+    name: 'DeepSeek', 
+    description: 'Advanced reasoning AI system',
+    puterConfig: {
+      model: 'deepseek-reasoner',
+      responseExtractor: (response: any) => {
+        if (typeof response === 'string') return response;
+        return response?.text || JSON.stringify(response);
+      },
+      useContext: true
+    }
+  },
+  { 
+    id: 'google/gemini-2.5-pro-exp-03-25:free', 
+    name: 'Gemini 2.5 Pro', 
+    description: 'Google\'s multimodal AI model',
+    puterConfig: {
+      model: 'google/gemini-2.5-pro-exp-03-25:free',
+      responseExtractor: (response: any) => {
+        if (typeof response === 'string') return response;
+        return response?.message?.content || JSON.stringify(response);
+      },
+      useContext: true
+    }
+  },
 ];
 
-const Chat: React.FC = () => {
+const KamiChat = () => {
   const [messages, setMessages] = useState<Message[]>([]);
-  const [inputValue, setInputValue] = useState('');
-  const [selectedModel, setSelectedModel] = useState(modelOptions[0]);
-  const [isModelDropdownOpen, setIsModelDropdownOpen] = useState(false);
-  const [isThinking, setIsThinking] = useState(false);
-  
+  const [input, setInput] = useState('');
+  const [isLoading, setIsLoading] = useState(false);
+  const [selectedModel, setSelectedModel] = useState(availableModels[0].id);
+  const [currentTab, setCurrentTab] = useState<'chat' | 'image'>('chat');
+  const [lastAssistantMessage, setLastAssistantMessage] = useState<Message | null>(null);
+  const [contextMode, setContextMode] = useState<'full' | 'recent' | 'none'>('full');
+  const [showBackground, setShowBackground] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   
-  // Scroll to bottom when messages change
+  useEffect(() => {
+    try {
+      const savedSettings = localStorage.getItem('kamiSettings');
+      if (savedSettings) {
+        const settings = JSON.parse(savedSettings);
+        if (settings.rememberChat) {
+          const savedMessages = localStorage.getItem('kamiChatHistory');
+          if (savedMessages) {
+            setMessages(JSON.parse(savedMessages));
+          }
+        }
+        
+        if (settings.defaultModel) {
+          const modelExists = availableModels.some(model => model.id === settings.defaultModel);
+          if (modelExists) {
+            setSelectedModel(settings.defaultModel);
+          }
+        }
+        
+        if (settings.modelContext) {
+          setContextMode(settings.modelContext === 'summary' ? 'recent' : settings.modelContext);
+        }
+      }
+    } catch (error) {
+      console.error("Error loading saved data:", error);
+    }
+  }, []);
+
+  useEffect(() => {
+    try {
+      const savedSettings = localStorage.getItem('kamiSettings');
+      if (savedSettings) {
+        const settings = JSON.parse(savedSettings);
+        if (settings.saveHistory) {
+          localStorage.setItem('kamiChatHistory', JSON.stringify(messages));
+        }
+      }
+      
+      const lastAssistant = [...messages].reverse().find(m => m.role === 'assistant');
+      if (lastAssistant) {
+        setLastAssistantMessage(lastAssistant);
+      }
+    } catch (error) {
+      console.error("Error saving chat history:", error);
+    }
+  }, [messages]);
+
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    
+    if (!window.puter) {
+      const script = document.createElement('script');
+      script.src = 'https://js.puter.com/v2/';
+      script.async = true;
+      document.body.appendChild(script);
+    }
   }, [messages]);
-  
-  const handleSendMessage = async (e: React.FormEvent) => {
+
+  const createContext = () => {
+    // Based on contextMode, prepare the messages for the AI
+    let contextMessages;
+    
+    switch (contextMode) {
+      case 'full':
+        // Use all messages
+        contextMessages = messages;
+        break;
+      case 'recent':
+        // Use last 6 messages or all if less than 6
+        contextMessages = messages.slice(-6);
+        break;
+      case 'none':
+        // Only include the current message (handled in submitPrompt)
+        contextMessages = [];
+        break;
+      default:
+        contextMessages = messages;
+    }
+    
+    return contextMessages.map(msg => ({
+      role: msg.role,
+      content: msg.content
+    }));
+  };
+
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     
-    if (!inputValue.trim()) return;
+    if (!input.trim()) return;
     
-    // Add user message
     const userMessage: Message = {
       id: Date.now().toString(),
-      content: inputValue,
-      isUser: true,
-      model: selectedModel.id,
-      timestamp: new Date(),
+      role: 'user',
+      content: input,
+      model: selectedModel
     };
     
-    setMessages((prev) => [...prev, userMessage]);
-    setInputValue('');
-    setIsThinking(true);
+    setMessages(prev => [...prev, userMessage]);
+    setInput('');
+    setIsLoading(true);
     
-    // Simulate AI response (in a real app, this would call an API)
-    setTimeout(() => {
-      const botMessage: Message = {
+    try {
+      if (!window.puter) {
+        toast.error("AI service not available. Please try refreshing the page.");
+        setIsLoading(false);
+        return;
+      }
+      
+      const modelConfig = availableModels.find(m => m.id === selectedModel)?.puterConfig;
+      if (!modelConfig) {
+        throw new Error(`Model configuration not found for ${selectedModel}`);
+      }
+      
+      // Use context based on model config and user settings
+      const context = modelConfig.useContext ? createContext() : [];
+      
+      const response = await window.puter.ai.chat(
+        input,
+        { 
+          model: modelConfig.model,
+          messages: context,
+        }
+      );
+      
+      const responseExtractor = modelConfig.responseExtractor || (r => String(r));
+      const responseText = responseExtractor(response);
+      
+      const aiMessage: Message = {
         id: (Date.now() + 1).toString(),
-        content: simulateResponse(inputValue, selectedModel.id),
-        isUser: false,
-        model: selectedModel.id,
-        timestamp: new Date(),
+        role: 'assistant',
+        content: responseText,
+        model: selectedModel
       };
       
-      setMessages((prev) => [...prev, botMessage]);
-      setIsThinking(false);
-    }, 1500);
+      setMessages(prev => [...prev, aiMessage]);
+      
+      const model = availableModels.find(m => m.id === selectedModel)?.name || selectedModel;
+      toast.success(`${model} has responded!`);
+      
+      try {
+        const savedSettings = localStorage.getItem('kamiSettings');
+        if (savedSettings) {
+          const settings = JSON.parse(savedSettings);
+          if (settings.voiceEnabled) {
+            setTimeout(() => {
+              const speech = SpeechService.getInstance();
+              speech.speak(responseText);
+            }, 500);
+          }
+        }
+      } catch (error) {
+        console.error("Error with auto voice playback:", error);
+      }
+    } catch (error) {
+      console.error("AI response error:", error);
+      toast.error("Failed to get AI response. Please try again.");
+    } finally {
+      setIsLoading(false);
+    }
   };
-  
-  const simulateResponse = (input: string, model: string): string => {
-    // This is a placeholder - in a real app this would integrate with actual AI models
-    const responses = [
-      "I've analyzed your request and found some fascinating insights on this topic.",
-      "That's an interesting question. From what I understand, there are multiple perspectives to consider.",
-      "Based on the current conversation context, I think the following would be helpful to explore.",
-      "I've searched through reliable sources and can provide this information for your consideration.",
-      "Looking at the patterns in our discussion so far, I believe this approach might be beneficial.",
-    ];
+
+  const handleExport = () => {
+    const chatHistory = messages.map(msg => 
+      `${msg.role === 'user' ? 'You' : 'KamiAI ('+availableModels.find(m => m.id === msg.model)?.name+')'}: ${msg.content}`
+    ).join('\n\n');
     
-    const randomResponse = responses[Math.floor(Math.random() * responses.length)];
-    return `${randomResponse} (Using ${model} to process your query: "${input}")`;
+    const element = document.createElement('a');
+    const file = new Blob([chatHistory], { type: 'text/plain' });
+    element.href = URL.createObjectURL(file);
+    element.download = `kamiai-chat-${new Date().toISOString().slice(0, 10)}.txt`;
+    document.body.appendChild(element);
+    element.click();
+    document.body.removeChild(element);
+    
+    toast.success("Chat history exported successfully!");
   };
-  
-  const handleExportChat = () => {
-    // Create chat export
-    const chatContent = messages.map((message) => {
-      const role = message.isUser ? 'User' : 'KamiAI';
-      const timestamp = message.timestamp.toLocaleString();
-      return `[${timestamp}] ${role} (${message.model}):\n${message.content}\n\n`;
-    }).join('');
-    
-    const blob = new Blob([chatContent], { type: 'text/plain' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `KamiAI_Chat_${new Date().toISOString().split('T')[0]}.txt`;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(url);
-    
-    toast.success('Chat history exported successfully!');
-  };
-  
+
   const handleClearChat = () => {
     setMessages([]);
-    toast.success('Chat history cleared!');
+    toast.info("Chat history cleared!");
   };
-  
+
   return (
-    <>
-      <ThreeJSBackground />
+    <div className="min-h-screen pt-16 bg-cosmic flex flex-col">
+      <AnimatePresence>
+        {showBackground && (
+          <motion.div 
+            className="fixed inset-0 z-0 pointer-events-none"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+          >
+            <div className="absolute inset-0 bg-gradient-to-br from-indigo-900/30 to-purple-900/30" />
+            <div className="absolute inset-0 bg-[url('/patterns/grid.svg')] opacity-10" />
+          </motion.div>
+        )}
+      </AnimatePresence>
       
-      <div className="min-h-screen cosmos-bg">
-        <Navigation />
-        
-        <div className="pt-24 pb-6 px-4 md:px-8">
-          <div className="max-w-6xl mx-auto">
-            <div className="mb-8 text-center">
-              <h1 className="cosmic-text text-3xl md:text-4xl font-bold mb-2">KamiChat</h1>
-              <p className="text-kami-ethereal/80">
-                Engage with hyper-intelligent AI using multiple models
-              </p>
-            </div>
+      <motion.div 
+        className="flex-grow container mx-auto px-4 py-6 flex flex-col"
+        initial={{ opacity: 0 }}
+        animate={{ opacity: 1 }}
+        transition={{ duration: 0.8 }}
+      >
+        <div className="max-w-5xl mx-auto w-full flex-grow flex flex-col">
+          <div className="flex flex-col md:flex-row md:items-center justify-between mb-6 gap-4">
+            <motion.div
+              className="flex items-center gap-2"
+              initial={{ opacity: 0, y: -20 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ delay: 0.2, duration: 0.8 }}
+            >
+              <h1 className="text-3xl font-bold flex items-center gap-2">
+                <span className="text-neon-magenta">Kami</span>
+                <span className="text-neon-cyan">Chat</span>
+                <span className="text-xs text-muted-foreground ml-2">by Rishab</span>
+              </h1>
+              
+              <BackgroundPlayer compact className="ml-4 hidden md:flex" />
+            </motion.div>
             
-            <div className="flex flex-col h-[75vh] rounded-xl portal-card">
-              {/* Chat header */}
-              <div className="p-4 border-b border-kami-cosmic/20 flex flex-wrap items-center justify-between gap-2">
-                <div className="relative">
-                  <button
-                    onClick={() => setIsModelDropdownOpen(!isModelDropdownOpen)}
-                    className="flex items-center space-x-2 px-3 py-2 rounded-lg bg-kami-void hover:bg-kami-cosmic/20 transition-colors"
-                  >
-                    <span className="w-2 h-2 rounded-full bg-kami-cosmic animate-pulse"></span>
-                    <span>{selectedModel.name}</span>
-                    <svg
-                      xmlns="http://www.w3.org/2000/svg"
-                      className={cn(
-                        "h-4 w-4 transition-transform duration-200",
-                        isModelDropdownOpen ? "transform rotate-180" : ""
-                      )}
-                      fill="none"
-                      viewBox="0 0 24 24"
-                      stroke="currentColor"
-                    >
-                      <path
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                        strokeWidth={2}
-                        d="M19 9l-7 7-7-7"
-                      />
-                    </svg>
-                  </button>
-                  
-                  {isModelDropdownOpen && (
-                    <div className="absolute mt-2 w-64 rounded-lg portal-card p-2 z-10">
-                      {modelOptions.map((model) => (
-                        <button
-                          key={model.id}
-                          onClick={() => {
-                            setSelectedModel(model);
-                            setIsModelDropdownOpen(false);
-                          }}
-                          className={cn(
-                            "w-full text-left px-3 py-2 rounded-lg transition-colors",
-                            selectedModel.id === model.id
-                              ? "bg-kami-cosmic/20"
-                              : "hover:bg-kami-void"
-                          )}
-                        >
-                          <div className="font-medium">{model.name}</div>
-                          <div className="text-xs text-kami-ethereal/70">{model.description}</div>
-                        </button>
+            <div className="flex gap-3 items-center">
+              <Select
+                value={contextMode}
+                onValueChange={(value) => setContextMode(value as 'full' | 'recent' | 'none')}
+              >
+                <SelectTrigger className="w-[120px] bg-cosmic-light/10 border-cosmic-accent/20">
+                  <SelectValue placeholder="Context" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="full">
+                    <div className="flex items-center gap-2">
+                      <Brain size={14} />
+                      <span>Full History</span>
+                    </div>
+                  </SelectItem>
+                  <SelectItem value="recent">
+                    <div className="flex items-center gap-2">
+                      <Brain size={14} />
+                      <span>Recent Only</span>
+                    </div>
+                  </SelectItem>
+                  <SelectItem value="none">
+                    <div className="flex items-center gap-2">
+                      <Brain size={14} />
+                      <span>No Context</span>
+                    </div>
+                  </SelectItem>
+                </SelectContent>
+              </Select>
+              
+              <KamiSettings />
+              
+              <Button 
+                variant="outline" 
+                size="sm"
+                onClick={handleExport}
+                disabled={messages.length === 0}
+                className="flex items-center gap-1"
+              >
+                <Download size={16} />
+                <span className="hidden sm:inline">Export</span>
+              </Button>
+              
+              <Button 
+                variant="outline" 
+                size="sm"
+                onClick={handleClearChat}
+                disabled={messages.length === 0}
+                className="flex items-center gap-1 text-red-400 hover:text-red-300"
+              >
+                <Trash2 size={16} />
+                <span className="hidden sm:inline">Clear</span>
+              </Button>
+            </div>
+          </div>
+          
+          <Tabs
+            value={currentTab}
+            onValueChange={(value) => setCurrentTab(value as 'chat' | 'image')}
+            className="mb-4"
+          >
+            <TabsList>
+              <TabsTrigger value="chat">Chat</TabsTrigger>
+              <TabsTrigger value="image">Kami Image</TabsTrigger>
+            </TabsList>
+            
+            <TabsContent value="chat" className="mt-4">
+              <div className="flex-grow rounded-lg bg-cosmic-light/30 border border-cosmic-accent/20 mb-4 overflow-hidden flex flex-col">
+                <div className="flex-grow p-4 overflow-y-auto">
+                  {messages.length === 0 ? (
+                    <div className="h-full flex flex-col items-center justify-center text-center p-6">
+                      <motion.div 
+                        className="w-16 h-16 bg-cosmic rounded-full mb-4 flex items-center justify-center"
+                        initial={{ scale: 0.8, opacity: 0 }}
+                        animate={{ scale: 1, opacity: 1 }}
+                        transition={{ delay: 0.4, type: "spring" }}
+                      >
+                        <span className="text-3xl">✨</span>
+                      </motion.div>
+                      <motion.h3 
+                        className="text-xl font-medium mb-2"
+                        initial={{ y: 10, opacity: 0 }}
+                        animate={{ y: 0, opacity: 1 }}
+                        transition={{ delay: 0.5 }}
+                      >
+                        Welcome to KamiChat
+                      </motion.h3>
+                      <motion.p 
+                        className="text-ethereal-white/70 max-w-md"
+                        initial={{ y: 10, opacity: 0 }}
+                        animate={{ y: 0, opacity: 1 }}
+                        transition={{ delay: 0.6 }}
+                      >
+                        Start a conversation with multiple AI models. Select your preferred model and ask anything!
+                      </motion.p>
+                    </div>
+                  ) : (
+                    <div className="space-y-4">
+                      {messages.map((message, index) => (
+                        <ChatMessage 
+                          key={message.id} 
+                          message={message} 
+                          modelName={availableModels.find(m => m.id === message.model)?.name || message.model}
+                        />
                       ))}
+                      <div ref={messagesEndRef} />
                     </div>
                   )}
                 </div>
                 
-                <div className="flex space-x-2">
-                  <button
-                    onClick={handleExportChat}
-                    className="p-2 rounded-lg hover:bg-kami-cosmic/20 transition-colors"
-                    title="Export Chat"
-                  >
-                    <svg
-                      xmlns="http://www.w3.org/2000/svg"
-                      className="h-5 w-5"
-                      fill="none"
-                      viewBox="0 0 24 24"
-                      stroke="currentColor"
-                    >
-                      <path
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                        strokeWidth={2}
-                        d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"
-                      />
-                    </svg>
-                  </button>
-                  
-                  <button
-                    onClick={handleClearChat}
-                    className="p-2 rounded-lg hover:bg-kami-cosmic/20 transition-colors"
-                    title="Clear Chat"
-                  >
-                    <svg
-                      xmlns="http://www.w3.org/2000/svg"
-                      className="h-5 w-5"
-                      fill="none"
-                      viewBox="0 0 24 24"
-                      stroke="currentColor"
-                    >
-                      <path
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                        strokeWidth={2}
-                        d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"
-                      />
-                    </svg>
-                  </button>
-                </div>
-              </div>
-              
-              {/* Chat messages */}
-              <div className="flex-1 overflow-y-auto p-4 space-y-4">
-                {messages.length === 0 ? (
-                  <div className="h-full flex items-center justify-center text-center">
-                    <div className="max-w-md">
-                      <div className="mb-4 w-16 h-16 mx-auto rounded-full bg-cosmic-gradient flex items-center justify-center">
-                        <span className="text-white text-2xl">神</span>
+                <form 
+                  onSubmit={handleSubmit}
+                  className="p-4 border-t border-cosmic-accent/20 bg-cosmic/50 backdrop-blur-sm"
+                >
+                  <div className="flex flex-col gap-3">
+                    <div className="flex flex-wrap justify-between items-center gap-2">
+                      <div className="w-40">
+                        <Select
+                          value={selectedModel}
+                          onValueChange={setSelectedModel}
+                          disabled={isLoading}
+                        >
+                          <SelectTrigger className="bg-cosmic border-cosmic-accent/30">
+                            <SelectValue placeholder="Select a model" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {availableModels.map(model => (
+                              <SelectItem key={model.id} value={model.id}>
+                                <div className="flex flex-col">
+                                  <span>{model.name}</span>
+                                  <span className="text-xs text-muted-foreground">{model.description}</span>
+                                </div>
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
                       </div>
-                      <h3 className="cosmic-text text-xl font-bold mb-2">Welcome to KamiChat</h3>
-                      <p className="text-kami-ethereal/80">
-                        Begin your conversation with hyper-intelligent AI. Ask questions, 
-                        seek wisdom, or engage in creative dialogue.
-                      </p>
-                    </div>
-                  </div>
-                ) : (
-                  messages.map((message) => (
-                    <div
-                      key={message.id}
-                      className={`flex ${message.isUser ? 'justify-end' : 'justify-start'}`}
-                    >
-                      <div
-                        className={cn(
-                          "max-w-[80%] rounded-xl p-3",
-                          message.isUser
-                            ? "bg-kami-cosmic/30 rounded-tr-none"
-                            : "bg-kami-void/80 rounded-tl-none"
+
+                      <div className="flex items-center gap-2">
+                        <BackgroundPlayer compact className="md:hidden" />
+                        
+                        {lastAssistantMessage && (
+                          <KamiVoice text={lastAssistantMessage.content} />
                         )}
-                      >
-                        <div className="mb-1 flex items-center justify-between">
-                          <span className={`text-xs ${message.isUser ? 'text-kami-ethereal/70' : 'cosmic-text'}`}>
-                            {message.isUser ? 'You' : 'KamiAI'}
-                          </span>
-                          <span className="text-xs text-kami-ethereal/50">
-                            {message.timestamp.toLocaleTimeString()}
-                          </span>
-                        </div>
-                        <p className="whitespace-pre-wrap">{message.content}</p>
                       </div>
                     </div>
-                  ))
-                )}
-                
-                {isThinking && (
-                  <div className="flex justify-start">
-                    <div className="bg-kami-void/80 rounded-xl rounded-tl-none p-4 max-w-[80%]">
-                      <div className="flex space-x-2">
-                        <div className="w-2 h-2 rounded-full bg-kami-cosmic animate-pulse"></div>
-                        <div className="w-2 h-2 rounded-full bg-kami-cosmic animate-pulse delay-150"></div>
-                        <div className="w-2 h-2 rounded-full bg-kami-cosmic animate-pulse delay-300"></div>
+                    
+                    <div className="relative flex-grow">
+                      <input
+                        type="text"
+                        value={input}
+                        onChange={(e) => setInput(e.target.value)}
+                        placeholder="Ask anything..."
+                        className="w-full px-4 py-3 rounded-lg bg-cosmic border border-cosmic-accent/30 focus:outline-none focus:ring-2 focus:ring-neon-cyan/50 text-ethereal-white"
+                        disabled={isLoading}
+                      />
+                      <div className="absolute right-3 bottom-3">
+                        <Button
+                          type="submit"
+                          size="sm"
+                          disabled={isLoading}
+                          className="cosmic-button text-white py-1 px-4"
+                        >
+                          {isLoading ? 
+                            <span className="flex items-center">
+                              <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                              Processing...
+                            </span> : 
+                            "Send"
+                          }
+                        </Button>
                       </div>
                     </div>
                   </div>
-                )}
-                
-                <div ref={messagesEndRef} />
-              </div>
-              
-              {/* Chat input */}
-              <div className="p-4 border-t border-kami-cosmic/20">
-                <form onSubmit={handleSendMessage} className="flex space-x-2">
-                  <input
-                    type="text"
-                    value={inputValue}
-                    onChange={(e) => setInputValue(e.target.value)}
-                    placeholder="Type your message..."
-                    className="flex-1 bg-kami-void/60 border border-kami-cosmic/30 rounded-full px-4 py-2 focus:outline-none focus:ring-2 focus:ring-kami-cosmic/50"
-                  />
-                  <MagicButton type="submit" disabled={isThinking}>
-                    <svg
-                      xmlns="http://www.w3.org/2000/svg"
-                      className="h-5 w-5"
-                      viewBox="0 0 20 20"
-                      fill="currentColor"
-                    >
-                      <path
-                        fillRule="evenodd"
-                        d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-8.707l-3-3a1 1 0 00-1.414 0l-3 3a1 1 0 001.414 1.414L9 9.414V13a1 1 0 102 0V9.414l1.293 1.293a1 1 0 001.414-1.414z"
-                        clipRule="evenodd"
-                      />
-                    </svg>
-                  </MagicButton>
                 </form>
               </div>
-            </div>
-          </div>
+            </TabsContent>
+            
+            <TabsContent value="image" className="mt-4">
+              <div className="rounded-lg bg-cosmic-light/30 border border-cosmic-accent/20 p-6">
+                <h3 className="text-xl font-medium mb-4">Generate Images with KamiAI</h3>
+                <KamiImage />
+              </div>
+            </TabsContent>
+          </Tabs>
         </div>
-      </div>
-    </>
+      </motion.div>
+    </div>
   );
 };
 
-export default Chat;
+export default KamiChat;

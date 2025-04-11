@@ -6,7 +6,7 @@ import { Button } from '@/components/ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import ChatMessage from '@/components/chat/ChatMessage';
-import { Loader2, Download, Trash2, Settings, Brain } from 'lucide-react';
+import { Loader2, Download, Trash2, Settings, Brain, BookOpen } from 'lucide-react';
 import KamiVoice from '@/components/voice/KamiVoice';
 import KamiImage from '@/components/image/KamiImage';
 import KamiSettings from '@/components/settings/KamiSettings';
@@ -114,6 +114,7 @@ const KamiChat = () => {
   const [lastAssistantMessage, setLastAssistantMessage] = useState<Message | null>(null);
   const [contextMode, setContextMode] = useState<'full' | 'recent' | 'none'>('full');
   const [showBackground, setShowBackground] = useState(false);
+  const [memoryEnabled, setMemoryEnabled] = useState(true);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   
   useEffect(() => {
@@ -137,6 +138,10 @@ const KamiChat = () => {
         
         if (settings.modelContext) {
           setContextMode(settings.modelContext === 'summary' ? 'recent' : settings.modelContext);
+        }
+
+        if (settings.memoryEnabled !== undefined) {
+          setMemoryEnabled(settings.memoryEnabled);
         }
       }
     } catch (error) {
@@ -175,8 +180,13 @@ const KamiChat = () => {
   }, [messages]);
 
   const createContext = () => {
-    // Based on contextMode, prepare the messages for the AI
+    // Based on contextMode and memoryEnabled, prepare the messages for the AI
     let contextMessages;
+    
+    // If memory is disabled, only use the current message
+    if (!memoryEnabled) {
+      return [];
+    }
     
     switch (contextMode) {
       case 'full':
@@ -199,6 +209,19 @@ const KamiChat = () => {
       role: msg.role,
       content: msg.content
     }));
+  };
+
+  const createEnhancedPrompt = (userInput: string) => {
+    if (!memoryEnabled) {
+      return userInput;
+    }
+
+    // Add instructions to review past conversation before responding
+    return `Before answering, please review our conversation history for relevant context. 
+    ${messages.length > 0 ? 'This is a continuation of our ongoing conversation.' : 'This is the start of our conversation.'} 
+    Please provide a comprehensive response considering all relevant past exchanges.
+    
+    User's current message: ${userInput}`;
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -232,8 +255,11 @@ const KamiChat = () => {
       // Use context based on model config and user settings
       const context = modelConfig.useContext ? createContext() : [];
       
+      // Create an enhanced prompt that instructs the AI to remember past conversations
+      const enhancedPrompt = createEnhancedPrompt(input);
+      
       const response = await window.puter.ai.chat(
-        input,
+        enhancedPrompt,
         { 
           model: modelConfig.model,
           messages: context,
@@ -298,6 +324,26 @@ const KamiChat = () => {
     toast.info("Chat history cleared!");
   };
 
+  const toggleMemory = () => {
+    const newMemoryState = !memoryEnabled;
+    setMemoryEnabled(newMemoryState);
+    
+    try {
+      const savedSettings = localStorage.getItem('kamiSettings');
+      if (savedSettings) {
+        const settings = JSON.parse(savedSettings);
+        settings.memoryEnabled = newMemoryState;
+        localStorage.setItem('kamiSettings', JSON.stringify(settings));
+      } else {
+        localStorage.setItem('kamiSettings', JSON.stringify({ memoryEnabled: newMemoryState }));
+      }
+      
+      toast.success(`AI memory ${newMemoryState ? 'enabled' : 'disabled'}`);
+    } catch (error) {
+      console.error("Error saving memory setting:", error);
+    }
+  };
+
   return (
     <div className="min-h-screen pt-16 bg-cosmic flex flex-col">
       <AnimatePresence>
@@ -338,6 +384,16 @@ const KamiChat = () => {
             </motion.div>
             
             <div className="flex gap-3 items-center">
+              <Button 
+                variant="outline" 
+                size="sm" 
+                onClick={toggleMemory}
+                className={`flex items-center gap-1 ${memoryEnabled ? 'bg-neon-cyan/20 text-neon-cyan' : 'bg-cosmic-light/10'}`}
+              >
+                <BookOpen size={16} />
+                <span className="hidden sm:inline">Memory {memoryEnabled ? 'ON' : 'OFF'}</span>
+              </Button>
+              
               <Select
                 value={contextMode}
                 onValueChange={(value) => setContextMode(value as 'full' | 'recent' | 'none')}
@@ -431,6 +487,7 @@ const KamiChat = () => {
                         transition={{ delay: 0.6 }}
                       >
                         Start a conversation with multiple AI models. Select your preferred model and ask anything!
+                        {memoryEnabled && <span className="block mt-2 text-neon-cyan">Memory is enabled - AI will remember your conversation history</span>}
                       </motion.p>
                     </div>
                   ) : (
@@ -489,7 +546,7 @@ const KamiChat = () => {
                         type="text"
                         value={input}
                         onChange={(e) => setInput(e.target.value)}
-                        placeholder="Ask anything..."
+                        placeholder={memoryEnabled ? "Ask anything (AI will remember your conversation)..." : "Ask anything..."}
                         className="w-full px-4 py-3 rounded-lg bg-cosmic border border-cosmic-accent/30 focus:outline-none focus:ring-2 focus:ring-neon-cyan/50 text-ethereal-white"
                         disabled={isLoading}
                       />

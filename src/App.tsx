@@ -9,6 +9,7 @@ import Home from "./pages/Home";
 import Chat from "./pages/Chat";
 import Quest from "./pages/Quest";
 import NotFound from "./pages/NotFound";
+import KamiVoices from "./pages/KamiVoices";
 
 const queryClient = new QueryClient();
 
@@ -23,6 +24,7 @@ const App = () => (
           <Route path="/home" element={<Home />} />
           <Route path="/chat" element={<Chat />} />
           <Route path="/quest" element={<Quest />} />
+          <Route path="/voices" element={<KamiVoices />} />
           <Route path="*" element={<NotFound />} />
         </Routes>
       </BrowserRouter>

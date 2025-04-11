@@ -25,7 +25,9 @@ const KamiVoice: React.FC<KamiVoiceProps> = ({ text }) => {
       setIsPreparing(true);
       try {
         const success = await speechService.speak(text);
-        setIsSpeaking(success);
+        if (success) {
+          setIsSpeaking(true);
+        }
       } catch (error) {
         console.error("Speech error:", error);
       } finally {

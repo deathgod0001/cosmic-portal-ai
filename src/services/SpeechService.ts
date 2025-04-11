@@ -6,6 +6,9 @@ type VoiceSettings = {
   voice: SpeechSynthesisVoice | null;
 };
 
+type SpeechEventType = 'end' | 'start' | 'pause' | 'resume' | 'error';
+type SpeechEventCallback = () => void;
+
 class SpeechService {
   private static instance: SpeechService;
   private synth: SpeechSynthesis;
@@ -17,10 +20,18 @@ class SpeechService {
     voice: null,
   };
   private utterance: SpeechSynthesisUtterance | null = null;
+  private eventListeners: Map<SpeechEventType, SpeechEventCallback[]> = new Map();
 
   private constructor() {
     this.synth = window.speechSynthesis;
     this.loadVoiceSettings();
+    
+    // Initialize event listener collections
+    this.eventListeners.set('start', []);
+    this.eventListeners.set('end', []);
+    this.eventListeners.set('pause', []);
+    this.eventListeners.set('resume', []);
+    this.eventListeners.set('error', []);
     
     // Event handlers for speech synthesis changes
     if (typeof window !== 'undefined') {
@@ -37,10 +48,10 @@ class SpeechService {
     return SpeechService.instance;
   }
 
-  public speak(text: string): Promise<void> {
+  public speak(text: string): Promise<boolean> {
     return new Promise((resolve, reject) => {
       if (!text) {
-        resolve();
+        resolve(false);
         return;
       }
       
@@ -60,18 +71,21 @@ class SpeechService {
 
       utterance.onstart = () => {
         this.isSpeaking = true;
+        this.dispatchEvent('start');
       };
 
       utterance.onend = () => {
         this.isSpeaking = false;
         this.utterance = null;
-        resolve();
+        this.dispatchEvent('end');
+        resolve(true);
       };
 
       utterance.onerror = (event) => {
         console.error('Speech synthesis error:', event);
         this.isSpeaking = false;
         this.utterance = null;
+        this.dispatchEvent('error');
         reject(event);
       };
 
@@ -84,18 +98,21 @@ class SpeechService {
       this.synth.cancel();
       this.isSpeaking = false;
       this.utterance = null;
+      this.dispatchEvent('end');
     }
   }
 
   public pause(): void {
     if (this.isSpeaking) {
       this.synth.pause();
+      this.dispatchEvent('pause');
     }
   }
 
   public resume(): void {
     if (this.synth.paused) {
       this.synth.resume();
+      this.dispatchEvent('resume');
     }
   }
 
@@ -127,6 +144,24 @@ class SpeechService {
 
   public getSpeakingStatus(): boolean {
     return this.isSpeaking;
+  }
+
+  // Event handling methods
+  public addEventListener(eventType: SpeechEventType, callback: SpeechEventCallback): void {
+    const listeners = this.eventListeners.get(eventType) || [];
+    listeners.push(callback);
+    this.eventListeners.set(eventType, listeners);
+  }
+
+  public removeEventListener(eventType: SpeechEventType, callback: SpeechEventCallback): void {
+    const listeners = this.eventListeners.get(eventType) || [];
+    const updatedListeners = listeners.filter(cb => cb !== callback);
+    this.eventListeners.set(eventType, updatedListeners);
+  }
+
+  private dispatchEvent(eventType: SpeechEventType): void {
+    const listeners = this.eventListeners.get(eventType) || [];
+    listeners.forEach(callback => callback());
   }
 
   private loadVoiceSettings(): void {
